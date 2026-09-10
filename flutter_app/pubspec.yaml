@@ -22,6 +22,9 @@ dependencies:
   # SHA-256 verification of downloaded update packages before they run.
   crypto: ^3.0.3
 
+  # Vault export/import as a single zip file.
+  archive: ^4.0.0
+
 dev_dependencies:
   flutter_test:
     sdk: flutter

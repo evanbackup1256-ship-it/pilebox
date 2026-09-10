@@ -1,9 +1,11 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:path_provider/path_provider.dart';
 
 import '../services/appearance_service.dart';
 import '../services/vault_service.dart';
+import '../services/vault_transfer_service.dart';
 import '../theme/app_theme.dart';
 import 'widgets/primitives.dart';
 import 'widgets/theme_gallery.dart';
@@ -376,6 +378,68 @@ class _VaultSection extends StatefulWidget {
 
 class _VaultSectionState extends State<_VaultSection> {
   String _status = '';
+  bool _busy = false;
+  late final _importController = TextEditingController();
+
+  @override
+  void dispose() {
+    _importController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _export() async {
+    setState(() => _busy = true);
+    try {
+      final vault = widget.vault;
+      await vault.flushPendingWrites();
+
+      final downloads = await _downloadsDir();
+      final stamp = DateTime.now();
+      final name = 'Pilebox-vault-'
+          '${stamp.year}${stamp.month.toString().padLeft(2, '0')}${stamp.day.toString().padLeft(2, '0')}'
+          '-${stamp.hour.toString().padLeft(2, '0')}${stamp.minute.toString().padLeft(2, '0')}.zip';
+      final zipPath = '${downloads.path}\\$name';
+
+      final count = await VaultTransferService.export(vault.path, zipPath);
+      if (!mounted) return;
+      setState(() => _status = 'Exported $count notes to $zipPath');
+    } catch (e) {
+      if (mounted) setState(() => _status = 'Export failed: $e');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _import() async {
+    final zipPath = _importController.text.trim();
+    if (zipPath.isEmpty) {
+      setState(() => _status = 'Paste the path to a .zip file first.');
+      return;
+    }
+
+    setState(() => _busy = true);
+    try {
+      await VaultTransferService.import(zipPath, widget.vault.path);
+      await widget.vault.setPath(widget.vault.path); // rescans from disk
+      if (!mounted) return;
+      setState(() => _status = 'Import complete. ${widget.vault.notes.length} notes in vault.');
+    } catch (e) {
+      if (mounted) setState(() => _status = 'Import failed: $e');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  static Future<Directory> _downloadsDir() async {
+    try {
+      final dir = await getDownloadsDirectory();
+      if (dir != null) return dir;
+    } catch (_) {
+      // Fall through.
+    }
+    final docs = await getApplicationDocumentsDirectory();
+    return docs;
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -469,6 +533,63 @@ class _VaultSectionState extends State<_VaultSection> {
                 await vault.flushPendingWrites();
                 setState(() => _status = 'All edits saved to disk.');
               },
+            ),
+          ],
+        ),
+        SizedBox(height: Layout.gap),
+        const SectionLabel('EXPORT & IMPORT'),
+        SizedBox(height: Layout.rowGap),
+        Text(
+          'Export bundles every note into one .zip - a single file to hand '
+          'to someone else or carry to a new machine, saved to your '
+          'Downloads folder.',
+          style: AppType.small.copyWith(height: 1.6),
+        ),
+        const SizedBox(height: 10),
+        ActionButton(
+          label: _busy ? 'Working...' : 'Export vault as .zip',
+          icon: Icons.upload_file_outlined,
+          compact: true,
+          enabled: !_busy,
+          onPressed: _export,
+        ),
+        SizedBox(height: Layout.gap),
+        Text(
+          'Import merges a previously exported .zip into the current vault. '
+          'Notes with the same file name are overwritten; nothing else is '
+          'touched.',
+          style: AppType.small.copyWith(height: 1.6),
+        ),
+        const SizedBox(height: 10),
+        Row(
+          children: [
+            Expanded(
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                decoration: BoxDecoration(
+                  color: Palette.surfaceRaised,
+                  borderRadius: BorderRadius.circular(7),
+                  border: Border.all(color: Palette.hairline),
+                ),
+                child: TextField(
+                  controller: _importController,
+                  style: AppType.mono.copyWith(fontSize: 12, color: Palette.textPrimary),
+                  decoration: InputDecoration(
+                    isDense: true,
+                    border: InputBorder.none,
+                    contentPadding: const EdgeInsets.symmetric(vertical: 10),
+                    hintText: 'Path to a .zip file',
+                    hintStyle: AppType.mono.copyWith(fontSize: 12, color: Palette.textTertiary),
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(width: 9),
+            ActionButton(
+              label: 'Import',
+              compact: true,
+              enabled: !_busy,
+              onPressed: _import,
             ),
           ],
         ),
