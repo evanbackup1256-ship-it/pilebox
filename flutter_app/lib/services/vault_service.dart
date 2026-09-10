@@ -62,6 +62,12 @@ class VaultService extends ChangeNotifier {
     final dir = Directory(_path);
     await dir.create(recursive: true);
     await _rescan();
+    _history.clear();
+    _historyLoadedFor = null;
+    await _loadHistory();
+    _templates = [];
+    _templatesLoaded = false;
+    await loadTemplates();
     if (persist) await _persistPath();
     notifyListeners();
   }
@@ -128,6 +134,8 @@ class VaultService extends ChangeNotifier {
     final note = _notes[noteId];
     if (note == null) return;
 
+    _snapshotBeforeChange(note);
+
     final updated = Note.parse(note.path, newBody, DateTime.now());
     // A title change (editing the `# Heading`) changes the note's id; drop
     // the old key so the note doesn't appear twice.
@@ -141,12 +149,164 @@ class VaultService extends ChangeNotifier {
     });
   }
 
+  // --- Version history -----------------------------------------------------
+  //
+  // A lightweight local safety net, not a full VCS: the last snapshot per
+  // note is kept only when enough has changed or enough time has passed
+  // since the previous one, so a burst of keystrokes doesn't create dozens
+  // of near-identical entries. Stored as one JSON file inside the vault
+  // folder itself (not the app's support directory) so history travels with
+  // the vault if it is copied or backed up elsewhere.
+  static const _maxHistoryPerNote = 20;
+  final Map<String, List<HistoryEntry>> _history = {};
+  DateTime? _historyLoadedFor;
+
+  Future<File> _historyFile() async => File('$_path\\.pilebox-history.json');
+
+  Future<void> _loadHistory() async {
+    if (_historyLoadedFor != null) return;
+    _historyLoadedFor = DateTime.now();
+    try {
+      final file = await _historyFile();
+      if (!await file.exists()) return;
+      final json = jsonDecode(await file.readAsString());
+      if (json is! Map<String, dynamic>) return;
+      _history.clear();
+      json.forEach((noteId, entries) {
+        if (entries is! List) return;
+        _history[noteId] = entries
+            .whereType<Map<String, dynamic>>()
+            .map(HistoryEntry.fromJson)
+            .toList();
+      });
+    } catch (_) {
+      // A corrupt or missing history file just means starting fresh.
+    }
+  }
+
+  Future<void> _persistHistory() async {
+    try {
+      final file = await _historyFile();
+      final json = {
+        for (final entry in _history.entries)
+          entry.key: entry.value.map((e) => e.toJson()).toList(),
+      };
+      await file.writeAsString(jsonEncode(json));
+    } catch (_) {
+      // Best-effort: losing history is far less costly than losing the note.
+    }
+  }
+
+  void _snapshotBeforeChange(Note note) {
+    final entries = _history.putIfAbsent(note.id, () => []);
+    final last = entries.isEmpty ? null : entries.last;
+
+    // Skip near-duplicate churn: only snapshot when the body actually
+    // changed from what's already saved, and not more than once every 20
+    // seconds, so continuous typing produces a handful of meaningful
+    // checkpoints rather than one per keystroke-driven debounce cycle.
+    if (last != null &&
+        last.body == note.body &&
+        DateTime.now().difference(last.savedAt) < const Duration(seconds: 20)) {
+      return;
+    }
+
+    entries.add(HistoryEntry(body: note.body, savedAt: note.modifiedAt));
+    if (entries.length > _maxHistoryPerNote) {
+      entries.removeRange(0, entries.length - _maxHistoryPerNote);
+    }
+    unawaited(_persistHistory());
+  }
+
+  /// Past versions of [noteId], oldest first, excluding the current body.
+  Future<List<HistoryEntry>> historyFor(String noteId) async {
+    await _loadHistory();
+    return List.unmodifiable(_history[noteId] ?? const []);
+  }
+
+  /// Restores [noteId]'s body to an earlier snapshot, snapshotting the
+  /// current body first so restoring is itself undoable.
+  void restoreVersion(String noteId, HistoryEntry entry) {
+    final note = _notes[noteId];
+    if (note == null) return;
+    _snapshotBeforeChange(note);
+    update(noteId, entry.body);
+  }
+
   Future<void> _write(Note note) async {
     try {
       await File(note.path).writeAsString(note.body);
     } catch (_) {
       // Best-effort: the in-memory copy is still correct for this session.
     }
+  }
+
+  // --- Templates ------------------------------------------------------------
+  //
+  // A reusable starting point for a recurring kind of note (a meeting log, a
+  // book-review skeleton, a project brief) - distinct from the daily note
+  // (one fixed, date-named note) and from version history (past states of
+  // one specific note). Stored the same way as history: one file inside the
+  // vault folder, so templates move with the vault.
+  List<NoteTemplate> _templates = [];
+  bool _templatesLoaded = false;
+
+  Future<File> _templatesFile() async => File('$_path\\.pilebox-templates.json');
+
+  Future<List<NoteTemplate>> loadTemplates() async {
+    if (_templatesLoaded) return _templates;
+    _templatesLoaded = true;
+    try {
+      final file = await _templatesFile();
+      if (await file.exists()) {
+        final json = jsonDecode(await file.readAsString());
+        if (json is List) {
+          _templates = json.whereType<Map<String, dynamic>>().map(NoteTemplate.fromJson).toList();
+        }
+      }
+    } catch (_) {
+      // Start with no templates rather than fail vault load over this.
+    }
+    return _templates;
+  }
+
+  List<NoteTemplate> get templates => List.unmodifiable(_templates);
+
+  Future<void> saveTemplate(String name, String body) async {
+    await loadTemplates();
+    _templates = [
+      ..._templates.where((t) => t.name.toLowerCase() != name.toLowerCase()),
+      NoteTemplate(name: name, body: body),
+    ];
+    await _persistTemplates();
+    notifyListeners();
+  }
+
+  Future<void> deleteTemplate(String name) async {
+    await loadTemplates();
+    _templates = _templates.where((t) => t.name != name).toList();
+    await _persistTemplates();
+    notifyListeners();
+  }
+
+  Future<void> _persistTemplates() async {
+    try {
+      final file = await _templatesFile();
+      await file.writeAsString(jsonEncode(_templates.map((t) => t.toJson()).toList()));
+    } catch (_) {
+      // Best-effort.
+    }
+  }
+
+  /// Creates a new note from [template], substituting the note's own title
+  /// for a leading heading placeholder so the template's title line becomes
+  /// the new note's actual title rather than a stray copy.
+  Future<Note> createFromTemplate(String title, NoteTemplate template) async {
+    final body = template.body.replaceFirst(
+      RegExp(r'^[ \t]*#[ \t]+.*$', multiLine: true),
+      '# $title',
+    );
+    return create(title, initialBody: body.contains('# $title') ? body : '# $title\n\n${template.body}');
   }
 
   Future<void> delete(String noteId) async {
@@ -230,6 +390,41 @@ class VaultService extends ChangeNotifier {
         .toList();
   }
 
+  /// How many notes were modified on each of the last [days] calendar days
+  /// (today last), for a lightweight activity heat-strip. Independent of the
+  /// version-history feature - this reads modification times already on
+  /// disk, so it works even for a vault with no history file yet.
+  List<int> activityByDay({int days = 14}) {
+    final today = DateTime.now();
+    final startOfToday = DateTime(today.year, today.month, today.day);
+    final counts = List<int>.filled(days, 0);
+
+    for (final note in _notes.values) {
+      final d = note.modifiedAt;
+      final startOfThatDay = DateTime(d.year, d.month, d.day);
+      final offset = startOfToday.difference(startOfThatDay).inDays;
+      final index = days - 1 - offset;
+      if (index >= 0 && index < days) counts[index]++;
+    }
+    return counts;
+  }
+
+  /// Consecutive days up to and including today with at least one note
+  /// touched - the traditional "streak" framing, computed the same way a
+  /// habit tracker would, purely from files' own modification times.
+  int get currentStreak {
+    final activity = activityByDay(days: 365);
+    var streak = 0;
+    for (var i = activity.length - 1; i >= 0; i--) {
+      if (activity[i] > 0) {
+        streak++;
+      } else {
+        break;
+      }
+    }
+    return streak;
+  }
+
   final _reviewRand = Random();
 
   /// One random note, for the method's own "read something at random and
@@ -273,4 +468,39 @@ class VaultService extends ChangeNotifier {
     }
     super.dispose();
   }
+}
+
+/// One past version of a note's body, kept for the version-history feature.
+@immutable
+class HistoryEntry {
+  const HistoryEntry({required this.body, required this.savedAt});
+
+  final String body;
+  final DateTime savedAt;
+
+  Map<String, dynamic> toJson() => {
+        'body': body,
+        'savedAt': savedAt.toIso8601String(),
+      };
+
+  factory HistoryEntry.fromJson(Map<String, dynamic> json) => HistoryEntry(
+        body: json['body'] as String? ?? '',
+        savedAt: DateTime.tryParse(json['savedAt'] as String? ?? '') ?? DateTime.now(),
+      );
+}
+
+/// A reusable note skeleton, saved from an existing note's body.
+@immutable
+class NoteTemplate {
+  const NoteTemplate({required this.name, required this.body});
+
+  final String name;
+  final String body;
+
+  Map<String, dynamic> toJson() => {'name': name, 'body': body};
+
+  factory NoteTemplate.fromJson(Map<String, dynamic> json) => NoteTemplate(
+        name: json['name'] as String? ?? 'Untitled template',
+        body: json['body'] as String? ?? '',
+      );
 }

@@ -5,6 +5,8 @@ import '../services/update_service.dart';
 import '../theme/app_theme.dart';
 import 'widgets/primitives.dart';
 
+const _staggerStep = Duration(milliseconds: 70);
+
 /// About and the update control.
 class CreditsPanel extends StatelessWidget {
   const CreditsPanel({super.key, required this.updater, required this.onQuit});
@@ -18,49 +20,66 @@ class CreditsPanel extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.center,
-            children: [
-              Image.asset('assets/brand/logo.png', width: 48, height: 48, filterQuality: FilterQuality.high),
-              const SizedBox(width: 16),
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(AppConfig.displayName, style: AppType.title.copyWith(fontSize: 22)),
-                  const SizedBox(height: 3),
-                  Text(AppConfig.tagline, style: AppType.body),
-                  const SizedBox(height: 6),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                    decoration: BoxDecoration(
-                      color: Palette.surfaceRaised,
-                      borderRadius: BorderRadius.circular(999),
-                      border: Border.all(color: Palette.hairline),
+          for (final (i, section) in [
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                Image.asset('assets/brand/logo.png', width: 48, height: 48, filterQuality: FilterQuality.high),
+                const SizedBox(width: 16),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(AppConfig.displayName, style: AppType.title.copyWith(fontSize: 22)),
+                    const SizedBox(height: 3),
+                    Text(AppConfig.tagline, style: AppType.body),
+                    const SizedBox(height: 6),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                      decoration: BoxDecoration(
+                        color: Palette.surfaceRaised,
+                        borderRadius: BorderRadius.circular(999),
+                        border: Border.all(color: Palette.hairline),
+                      ),
+                      child: Text('v${AppConfig.version}', style: AppType.timecode.copyWith(color: Palette.textSecondary)),
                     ),
-                    child: Text('v${AppConfig.version}', style: AppType.timecode.copyWith(color: Palette.textSecondary)),
-                  ),
-                ],
-              ),
-            ],
-          ),
-          const SizedBox(height: 26),
-          const SectionLabel('UPDATES'),
-          const SizedBox(height: 12),
-          _UpdateBlock(updater: updater, onQuit: onQuit),
-          const SizedBox(height: 22),
-          const SectionLabel('SECURITY'),
-          const SizedBox(height: 12),
-          _SecurityNote(),
-          const SizedBox(height: 22),
-          const SectionLabel('HOW IT WORKS'),
-          const SizedBox(height: 12),
-          Text(
-            'Every note is a plain .md file in a folder you choose. Link notes with '
-            '[[double brackets]], tag them with #hashtags, and Pilebox builds the '
-            'backlinks and graph for you - live, from the files themselves.\n\n'
-            'Nothing leaves your machine. No account, no server, no telemetry.',
-            style: AppType.body.copyWith(height: 1.7),
-          ),
+                  ],
+                ),
+              ],
+            ),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const SectionLabel('UPDATES'),
+                const SizedBox(height: 12),
+                _UpdateBlock(updater: updater, onQuit: onQuit),
+              ],
+            ),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const SectionLabel('SECURITY'),
+                const SizedBox(height: 12),
+                _SecurityNote(),
+              ],
+            ),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const SectionLabel('HOW IT WORKS'),
+                const SizedBox(height: 12),
+                Text(
+                  'Every note is a plain .md file in a folder you choose. Link notes with '
+                  '[[double brackets]], tag them with #hashtags, and Pilebox builds the '
+                  'backlinks and graph for you - live, from the files themselves.\n\n'
+                  'Nothing leaves your machine. No account, no server, no telemetry.',
+                  style: AppType.body.copyWith(height: 1.7),
+                ),
+              ],
+            ),
+          ].indexed) ...[
+            if (i > 0) const SizedBox(height: 22),
+            FadeInUp(delay: _staggerStep * i, child: section),
+          ],
         ],
       ),
     );
@@ -157,7 +176,22 @@ class _UpdateBlockState extends State<_UpdateBlock> with SingleTickerProviderSta
                       final t = isBusy ? _pulse.value : 0.0;
                       return Transform.scale(scale: 1 + t * 0.15, child: child);
                     },
-                    child: _StageIcon(stage: stage),
+                    child: AnimatedSwitcher(
+                      duration: Motion.base,
+                      switchInCurve: Motion.spring,
+                      switchOutCurve: Motion.swift,
+                      transitionBuilder: (child, anim) => FadeTransition(
+                        opacity: anim,
+                        child: ScaleTransition(
+                          scale: Tween(begin: 0.6, end: 1.0).animate(anim),
+                          child: RotationTransition(
+                            turns: Tween(begin: 0.15, end: 0.0).animate(anim),
+                            child: child,
+                          ),
+                        ),
+                      ),
+                      child: _StageIcon(key: ValueKey(stage), stage: stage),
+                    ),
                   ),
                   const SizedBox(width: 12),
                   Expanded(
@@ -166,6 +200,14 @@ class _UpdateBlockState extends State<_UpdateBlock> with SingleTickerProviderSta
                       children: [
                         AnimatedSwitcher(
                           duration: Motion.quick,
+                          switchInCurve: Motion.swift,
+                          transitionBuilder: (child, anim) => FadeTransition(
+                            opacity: anim,
+                            child: SlideTransition(
+                              position: Tween(begin: const Offset(0, 0.3), end: Offset.zero).animate(anim),
+                              child: child,
+                            ),
+                          ),
                           child: Text(
                             key: ValueKey(stage),
                             switch (stage) {
@@ -194,7 +236,15 @@ class _UpdateBlockState extends State<_UpdateBlock> with SingleTickerProviderSta
                     ),
                   ),
                   const SizedBox(width: 12),
-                  _UpdateAction(updater: widget.updater, onQuit: widget.onQuit),
+                  AnimatedSwitcher(
+                    duration: Motion.quick,
+                    switchInCurve: Motion.spring,
+                    transitionBuilder: (child, anim) => FadeTransition(
+                      opacity: anim,
+                      child: ScaleTransition(scale: Tween(begin: 0.85, end: 1.0).animate(anim), child: child),
+                    ),
+                    child: _UpdateAction(key: ValueKey(stage), updater: widget.updater, onQuit: widget.onQuit),
+                  ),
                 ],
               ),
               AnimatedSize(
@@ -225,7 +275,7 @@ class _UpdateBlockState extends State<_UpdateBlock> with SingleTickerProviderSta
 }
 
 class _StageIcon extends StatelessWidget {
-  const _StageIcon({required this.stage});
+  const _StageIcon({super.key, required this.stage});
   final UpdateStage stage;
 
   @override
@@ -241,7 +291,7 @@ class _StageIcon extends StatelessWidget {
 }
 
 class _UpdateAction extends StatelessWidget {
-  const _UpdateAction({required this.updater, required this.onQuit});
+  const _UpdateAction({super.key, required this.updater, required this.onQuit});
   final UpdateService updater;
   final Future<void> Function() onQuit;
 

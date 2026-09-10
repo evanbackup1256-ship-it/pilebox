@@ -10,8 +10,20 @@ import '../theme/app_theme.dart';
 /// editor/behaviour preferences in one settings.json - the same file
 /// [bootstrapSkin] reads before the first frame.
 class AppearanceStore {
+  /// Resolves the folder settings.json lives in. Defaults to path_provider's
+  /// real platform channel; overridable so tests can point it at a plain
+  /// Directory.systemTemp instead.
+  ///
+  /// This exists because path_provider has no working channel backend in a
+  /// bare `flutter test` widget test - not a thrown exception (which the
+  /// try/catch below would handle fine), but the awaited channel call never
+  /// completing at all, which hangs any test that reaches it forever. Every
+  /// public method here goes through this one seam, so a test only has to
+  /// override it once.
+  static Future<Directory> Function() directoryResolver = getApplicationSupportDirectory;
+
   static Future<File> _file() async {
-    final dir = await getApplicationSupportDirectory();
+    final dir = await directoryResolver();
     await dir.create(recursive: true);
     return File('${dir.path}\\settings.json');
   }

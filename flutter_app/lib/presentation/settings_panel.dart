@@ -7,7 +7,9 @@ import '../services/appearance_service.dart';
 import '../services/vault_service.dart';
 import '../services/vault_transfer_service.dart';
 import '../theme/app_theme.dart';
+import 'widgets/animated_text.dart';
 import 'widgets/primitives.dart';
+import 'widgets/springable.dart';
 import 'widgets/theme_gallery.dart';
 
 enum _Section { general, appearance, editor, vault, shortcuts }
@@ -178,7 +180,9 @@ class _NavItemState extends State<_NavItem> {
       child: GestureDetector(
         onTap: widget.onTap,
         behavior: HitTestBehavior.opaque,
-        child: Container(
+        child: AnimatedContainer(
+          duration: Motion.quick,
+          curve: Motion.swift,
           margin: const EdgeInsets.only(bottom: 2),
           padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 9),
           decoration: BoxDecoration(
@@ -187,15 +191,22 @@ class _NavItemState extends State<_NavItem> {
           ),
           child: Row(
             children: [
-              Icon(widget.icon, size: 16, color: active ? Palette.amber : Palette.textSecondary),
+              Springable(
+                value: active ? 1.0 : 0.0,
+                spring: Motion.snappy,
+                builder: (context, t, child) => Transform.scale(scale: 1.0 + 0.15 * t, child: child),
+                child: Icon(widget.icon, size: 16, color: active ? Palette.amber : Palette.textSecondary),
+              ),
               const SizedBox(width: 10),
-              Text(
-                widget.label,
+              AnimatedDefaultTextStyle(
+                duration: Motion.quick,
+                curve: Motion.swift,
                 style: AppType.body.copyWith(
                   fontSize: 12.5,
                   fontWeight: active ? FontWeight.w600 : FontWeight.w400,
                   color: active ? Palette.amber : Palette.textSecondary,
                 ),
+                child: Text(widget.label),
               ),
             ],
           ),
@@ -350,13 +361,17 @@ class _EditorSection extends StatelessWidget {
             borderRadius: BorderRadius.circular(9),
             border: Border.all(color: Palette.hairline),
           ),
-          child: Text(
-            '# A preview heading\n\nBody text at the size and spacing above, '
-            'with a [[wikilink]] and a #tag for reference.',
+          child: AnimatedDefaultTextStyle(
+            duration: Motion.base,
+            curve: Motion.glide,
             style: AppType.mono.copyWith(
               color: Palette.textPrimary,
               fontSize: prefs.editorFontSize,
               height: prefs.editorLineHeight,
+            ),
+            child: const Text(
+              '# A preview heading\n\nBody text at the size and spacing above, '
+              'with a [[wikilink]] and a #tag for reference.',
             ),
           ),
         ),
@@ -498,13 +513,21 @@ class _VaultSectionState extends State<_VaultSection> {
             spacing: 10,
             runSpacing: 10,
             children: [
-              _StatTile(label: 'Total notes', value: '${vault.notes.length}'),
-              _StatTile(label: 'Inbox', value: '${vault.inbox.length}'),
-              _StatTile(label: 'Orphans', value: '${vault.orphans.length}'),
-              _StatTile(label: 'Pinned', value: '${vault.pinned.length}'),
-              _StatTile(label: 'Tags', value: '${vault.tagCounts.length}'),
+              _StatTile(label: 'Total notes', value: vault.notes.length),
+              _StatTile(label: 'Inbox', value: vault.inbox.length),
+              _StatTile(label: 'Orphans', value: vault.orphans.length),
+              _StatTile(label: 'Pinned', value: vault.pinned.length),
+              _StatTile(label: 'Tags', value: vault.tagCounts.length),
+              _StatTile(label: 'Day streak', value: vault.currentStreak, accent: vault.currentStreak > 0),
             ],
           ),
+        ),
+        SizedBox(height: Layout.gap),
+        const SectionLabel('ACTIVITY'),
+        SizedBox(height: Layout.rowGap),
+        ListenableBuilder(
+          listenable: vault,
+          builder: (context, _) => _ActivityStrip(activity: vault.activityByDay()),
         ),
         SizedBox(height: Layout.gap),
         const SectionLabel('BACKUP'),
@@ -603,27 +626,90 @@ class _VaultSectionState extends State<_VaultSection> {
 }
 
 class _StatTile extends StatelessWidget {
-  const _StatTile({required this.label, required this.value});
+  const _StatTile({required this.label, required this.value, this.accent = false});
   final String label;
-  final String value;
+  final int value;
+  final bool accent;
 
   @override
   Widget build(BuildContext context) {
-    return Container(
+    return AnimatedContainer(
+      duration: Motion.base,
+      curve: Motion.swift,
       width: 96,
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: BoxDecoration(
         color: Palette.surface,
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: Palette.hairline),
+        border: Border.all(color: accent ? Palette.amber.withValues(alpha: 0.45) : Palette.hairline),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(value, style: AppType.heading.copyWith(fontSize: 20)),
+          CountUpNumber(
+            value: value,
+            style: AppType.heading.copyWith(fontSize: 20, color: accent ? Palette.amber : Palette.textPrimary),
+          ),
           const SizedBox(height: 2),
           Text(label, style: AppType.label),
         ],
+      ),
+    );
+  }
+}
+
+/// A GitHub-style heat-strip of the last two weeks' editing activity - a
+/// glance at whether the vault is an active, living practice or a pile that
+/// has gone quiet, which the raw note-count stats above do not show.
+class _ActivityStrip extends StatelessWidget {
+  const _ActivityStrip({required this.activity});
+  final List<int> activity;
+
+  @override
+  Widget build(BuildContext context) {
+    final maxCount = activity.fold<int>(1, (m, c) => c > m ? c : m);
+    final today = DateTime.now();
+
+    return Row(
+      children: [
+        for (var i = 0; i < activity.length; i++) ...[
+          if (i > 0) const SizedBox(width: 5),
+          Expanded(
+            child: Tooltip(
+              message: () {
+                final day = today.subtract(Duration(days: activity.length - 1 - i));
+                final n = activity[i];
+                return '${day.month}/${day.day}: $n ${n == 1 ? 'note' : 'notes'} touched';
+              }(),
+              waitDuration: const Duration(milliseconds: 300),
+              child: _ActivityCell(intensity: activity[i] == 0 ? 0.0 : (0.28 + 0.72 * activity[i] / maxCount)),
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+}
+
+class _ActivityCell extends StatelessWidget {
+  const _ActivityCell({required this.intensity});
+  final double intensity;
+
+  @override
+  Widget build(BuildContext context) {
+    return TweenAnimationBuilder<double>(
+      tween: Tween(begin: 0, end: intensity),
+      duration: Motion.slow,
+      curve: Motion.glide,
+      builder: (context, t, _) => Container(
+        height: 26,
+        decoration: BoxDecoration(
+          color: t == 0
+              ? Palette.surfaceRaised
+              : Color.alphaBlend(Palette.amber.withValues(alpha: t.clamp(0.0, 1.0)), Palette.surfaceRaised),
+          borderRadius: BorderRadius.circular(4),
+          border: Border.all(color: Palette.hairline),
+        ),
       ),
     );
   }
@@ -640,6 +726,7 @@ class _ShortcutsSection extends StatelessWidget {
     ('Ctrl + F', 'Focus the note search field'),
     ('Ctrl + P', 'Toggle pin on the open note'),
     ('Ctrl + E', 'Toggle edit / preview'),
+    ('Ctrl + .', 'Toggle focus mode'),
     ('Esc', 'Close a dialog or the command palette'),
   ];
 
@@ -650,27 +737,33 @@ class _ShortcutsSection extends StatelessWidget {
       children: [
         const SectionLabel('KEYBOARD SHORTCUTS'),
         SizedBox(height: Layout.gap),
-        for (final s in _shortcuts)
-          Padding(
-            padding: const EdgeInsets.only(bottom: 10),
-            child: Row(
-              children: [
-                Container(
-                  width: 96,
-                  padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 6),
-                  decoration: BoxDecoration(
-                    color: Palette.surfaceRaised,
-                    borderRadius: BorderRadius.circular(6),
-                    border: Border.all(color: Palette.hairline),
-                  ),
-                  alignment: Alignment.center,
-                  child: Text(s.$1, style: AppType.timecode.copyWith(fontSize: 11)),
+        for (final entry in staggered(
+          [
+            for (final s in _shortcuts)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 10),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 96,
+                      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 6),
+                      decoration: BoxDecoration(
+                        color: Palette.surfaceRaised,
+                        borderRadius: BorderRadius.circular(6),
+                        border: Border.all(color: Palette.hairline),
+                      ),
+                      alignment: Alignment.center,
+                      child: Text(s.$1, style: AppType.timecode.copyWith(fontSize: 11)),
+                    ),
+                    const SizedBox(width: 14),
+                    Expanded(child: Text(s.$2, style: AppType.body.copyWith(fontSize: 12.5))),
+                  ],
                 ),
-                const SizedBox(width: 14),
-                Expanded(child: Text(s.$2, style: AppType.body.copyWith(fontSize: 12.5))),
-              ],
-            ),
-          ),
+              ),
+          ],
+          step: const Duration(milliseconds: 22),
+        ))
+          entry,
       ],
     );
   }

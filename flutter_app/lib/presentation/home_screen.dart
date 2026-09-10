@@ -9,7 +9,9 @@ import '../services/update_service.dart';
 import '../services/vault_service.dart';
 import '../theme/app_theme.dart';
 import 'credits_panel.dart';
+import 'find_replace_panel.dart';
 import 'graph_panel.dart';
+import 'help_panel.dart';
 import 'notes_view.dart';
 import 'review_panel.dart';
 import 'settings_panel.dart';
@@ -18,19 +20,25 @@ import 'widgets/command_palette.dart';
 import 'widgets/springable.dart';
 import 'widgets/window_chrome.dart';
 
-enum _View { notes, graph, tags, review, settings, about }
+enum _View { notes, graph, tags, review, help, settings, about }
 
 /// Application shell: a fixed left rail plus a swapping content pane.
+///
+/// By the time this is shown, [SplashScreen] has already loaded the vault,
+/// created the first-run welcome note if needed, and kicked off the update
+/// check - this widget owns no startup sequence of its own.
 class HomeScreen extends StatefulWidget {
   const HomeScreen({
     super.key,
     required this.vault,
     required this.updater,
+    required this.preferences,
     required this.onQuit,
   });
 
   final VaultService vault;
   final UpdateService updater;
+  final AppPreferences preferences;
   final Future<void> Function() onQuit;
 
   @override
@@ -42,38 +50,15 @@ class _HomeScreenState extends State<HomeScreen> {
   String? _openNoteId;
   String? _tagFilter;
   int _reviewTab = 0;
+  bool _focusMode = false;
   final _notesKey = GlobalKey<NotesViewState>();
   final _shortcuts = FocusNode();
-  AppPreferences _preferences = const AppPreferences();
+  late final AppPreferences _preferences = widget.preferences;
 
   @override
   void initState() {
     super.initState();
     widget.vault.addListener(_onChange);
-    _boot();
-  }
-
-  Future<void> _boot() async {
-    _preferences = await AppearanceStore.loadPreferences();
-    await widget.vault.load();
-    if (widget.vault.isEmpty) {
-      await widget.vault.create(
-        'Welcome to Pilebox',
-        initialBody: '# Welcome to Pilebox\n\n'
-            'This is your first note. A few things worth knowing:\n\n'
-            '- Every note is a plain `.md` file in your vault folder.\n'
-            '- Link notes with [[double brackets]] - typing [[Another Note]] and '
-            'opening it creates it if it does not exist yet.\n'
-            '- Tag anything with #tags, like #project or #idea.\n'
-            '- The Graph view shows every note and how they connect.\n'
-            '- Notes start as Fleeting captures. Mark one Permanent once it '
-            'is a fully-formed idea, from its editor toolbar.\n'
-            '- Press Ctrl+K any time to jump straight to a note or command.\n\n'
-            'Try creating [[My Second Note]] to see a link in action.',
-      );
-    }
-    if (mounted) setState(() {});
-    unawaited(widget.updater.check(silent: true));
   }
 
   void _onChange() {
@@ -108,7 +93,26 @@ class _HomeScreenState extends State<HomeScreen> {
     _openNote(note.id);
   }
 
+  Future<void> _openDailyNote() async {
+    final note = await widget.vault.dailyNote();
+    _openNote(note.id);
+  }
+
   void _openPaletteView(String key) {
+    if (key == 'find-replace') {
+      FindReplacePanel.show(context, vault: widget.vault);
+      return;
+    }
+    if (key == 'template') {
+      setState(() {
+        _view = _View.notes;
+        _openNoteId = null;
+      });
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _notesKey.currentState?.openTemplatePicker();
+      });
+      return;
+    }
     setState(() {
       switch (key) {
         case 'graph':
@@ -123,6 +127,8 @@ class _HomeScreenState extends State<HomeScreen> {
         case 'random':
           _view = _View.review;
           _reviewTab = 3;
+        case 'help':
+          _view = _View.help;
       }
     });
   }
@@ -134,6 +140,7 @@ class _HomeScreenState extends State<HomeScreen> {
       onOpenNote: _openNote,
       onNewNote: _newNoteFromPalette,
       onOpenView: _openPaletteView,
+      onOpenDaily: _openDailyNote,
     );
   }
 
@@ -151,6 +158,9 @@ class _HomeScreenState extends State<HomeScreen> {
         return KeyEventResult.handled;
       case LogicalKeyboardKey.keyP:
         if (_openNoteId != null) widget.vault.togglePin(_openNoteId!);
+        return KeyEventResult.handled;
+      case LogicalKeyboardKey.period:
+        setState(() => _focusMode = !_focusMode);
         return KeyEventResult.handled;
       default:
         return KeyEventResult.ignored;
@@ -188,19 +198,33 @@ class _HomeScreenState extends State<HomeScreen> {
             children: [
               WindowChrome(
                 title: AppConfig.displayName.toUpperCase(),
-                trailing: _SearchHint(onTap: _showPalette),
+                trailing: _focusMode
+                    ? _FocusHint(onTap: () => setState(() => _focusMode = false))
+                    : _SearchHint(onTap: _showPalette),
               ),
               Expanded(
                 child: Row(
                   children: [
-                    _Rail(
-                      view: _view,
-                      inboxCount: _preferences.showInboxBadge ? inboxCount : 0,
-                      onSelect: (v) => setState(() => _view = v),
+                    ClipRect(
+                      child: AnimatedAlign(
+                        duration: Motion.base,
+                        curve: Motion.glide,
+                        alignment: Alignment.centerLeft,
+                        widthFactor: _focusMode ? 0.0 : 1.0,
+                        child: _Rail(
+                          view: _view,
+                          inboxCount: _preferences.showInboxBadge ? inboxCount : 0,
+                          onSelect: (v) => setState(() => _view = v),
+                        ),
+                      ),
                     ),
                     Expanded(
-                      child: Padding(
-                        padding: EdgeInsets.fromLTRB(Layout.gutter, Layout.gap, Layout.gutter, Layout.gap),
+                      child: AnimatedPadding(
+                        duration: Motion.base,
+                        curve: Motion.glide,
+                        padding: _focusMode
+                            ? const EdgeInsets.symmetric(horizontal: 96, vertical: 26)
+                            : EdgeInsets.fromLTRB(Layout.gutter, Layout.gap, Layout.gutter, Layout.gap),
                         child: _buildView(),
                       ),
                     ),
@@ -217,13 +241,24 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget _buildView() {
     return AnimatedSwitcher(
       duration: Motion.base,
-      switchInCurve: Motion.swift,
+      switchInCurve: Motion.glide,
+      switchOutCurve: Motion.swift,
+      // A subtle scale-up-from-98% alongside the fade gives the swap a sense
+      // of depth - the incoming view feels like it settles into place from
+      // just behind the glass, rather than only fading over the old one.
       transitionBuilder: (child, anim) => FadeTransition(
         opacity: anim,
         child: SlideTransition(
           position: Tween(begin: const Offset(0, 0.02), end: Offset.zero).animate(anim),
-          child: child,
+          child: ScaleTransition(
+            scale: Tween(begin: 0.985, end: 1.0).animate(anim),
+            child: child,
+          ),
         ),
+      ),
+      layoutBuilder: (currentChild, previousChildren) => Stack(
+        alignment: Alignment.topLeft,
+        children: [...previousChildren, if (currentChild != null) currentChild],
       ),
       child: switch (_view) {
         _View.notes => NotesView(
@@ -240,6 +275,7 @@ class _HomeScreenState extends State<HomeScreen> {
             onOpenNote: _openNote,
             initialTab: _reviewTab,
           ),
+        _View.help => const HelpPanel(key: ValueKey('help')),
         _View.settings => SettingsPanel(
             key: const ValueKey('settings'),
             vault: widget.vault,
@@ -293,6 +329,51 @@ class _SearchHintState extends State<_SearchHint> {
   }
 }
 
+/// Shown in the titlebar instead of the search hint while Focus Mode is on,
+/// so there is always a visible, one-click way back rather than relying on
+/// the user to remember the shortcut that got them in.
+class _FocusHint extends StatefulWidget {
+  const _FocusHint({required this.onTap});
+  final VoidCallback onTap;
+
+  @override
+  State<_FocusHint> createState() => _FocusHintState();
+}
+
+class _FocusHintState extends State<_FocusHint> {
+  bool _hover = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      onEnter: (_) => setState(() => _hover = true),
+      onExit: (_) => setState(() => _hover = false),
+      child: GestureDetector(
+        onTap: widget.onTap,
+        child: AnimatedContainer(
+          duration: Motion.quick,
+          margin: const EdgeInsets.symmetric(vertical: 6),
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+          decoration: BoxDecoration(
+            color: _hover ? Palette.surfaceRaised : Colors.transparent,
+            borderRadius: BorderRadius.circular(6),
+            border: Border.all(color: Palette.amber.withValues(alpha: 0.4)),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.center_focus_strong_rounded, size: 13, color: Palette.amber),
+              const SizedBox(width: 7),
+              Text('Focus mode · Ctrl+.', style: AppType.timecode.copyWith(fontSize: 10.5, color: Palette.amber)),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 /// Icon navigation rail.
 class _Rail extends StatelessWidget {
   const _Rail({required this.view, required this.inboxCount, required this.onSelect});
@@ -320,6 +401,7 @@ class _Rail extends StatelessWidget {
             onTap: () => onSelect(_View.review),
           ),
           const Spacer(),
+          _RailButton(icon: Icons.menu_book_outlined, tooltip: 'Help', selected: view == _View.help, onTap: () => onSelect(_View.help)),
           _RailButton(icon: Icons.tune_rounded, tooltip: 'Settings', selected: view == _View.settings, onTap: () => onSelect(_View.settings)),
           _RailButton(icon: Icons.info_outline_rounded, tooltip: 'About', selected: view == _View.about, onTap: () => onSelect(_View.about)),
           const SizedBox(height: 12),
@@ -389,49 +471,78 @@ class _RailButtonState extends State<_RailButton> {
                     ),
                   ),
                 ),
-                Springable(
-                  value: _hover ? 1.12 : 1.0,
-                  spring: Motion.snappy,
-                  builder: (context, scale, child) => Transform.scale(scale: scale, child: child),
-                  child: Icon(
-                    widget.icon,
-                    size: 19,
-                    color: active ? Palette.amber : (_hover ? Palette.textSecondary : Palette.textTertiary),
-                  ),
-                ),
-                Positioned(
-                  top: 8,
-                  right: 11,
-                  // A spring-scaled entrance for the badge itself: it should
-                  // feel like it pops into existence, not just appear, since
-                  // "your inbox now has an item" is a state change worth a
-                  // beat of its own rather than a silent size-zero-to-full.
-                  child: Springable(
-                    value: widget.badgeCount > 0 ? 1.0 : 0.0,
-                    spring: Motion.snappy,
-                    builder: (context, scale, child) => Transform.scale(scale: scale, child: child),
-                    child: Container(
-                      constraints: const BoxConstraints(minWidth: 15),
-                      height: 15,
-                      padding: const EdgeInsets.symmetric(horizontal: 3),
-                      alignment: Alignment.center,
-                      decoration: BoxDecoration(
-                        color: Palette.amber,
-                        borderRadius: BorderRadius.circular(999),
-                        border: Border.all(color: Palette.chrome, width: 1.5),
-                      ),
-                      child: Text(
-                        widget.badgeCount > 9 ? '9+' : '${widget.badgeCount}',
-                        textAlign: TextAlign.center,
-                        style: TextStyle(
-                          fontFamily: 'Segoe UI',
-                          fontSize: 9,
-                          fontWeight: FontWeight.w700,
-                          height: 1,
-                          color: Palette.skin.isLight ? Colors.white : Palette.void_,
+                // The icon and its badge are sized and positioned together in
+                // one fixed 24x24 box, anchored to the icon's own corner
+                // rather than to the whole 58px-wide rail. Positioning the
+                // badge against the rail's edge put it only ~8px from the
+                // icon at this width, close enough to visually collide with
+                // it instead of reading as a separate badge.
+                SizedBox(
+                  width: 24,
+                  height: 24,
+                  child: Stack(
+                    clipBehavior: Clip.none,
+                    children: [
+                      Center(
+                        child: Springable(
+                          value: _hover ? 1.12 : (active ? 1.05 : 1.0),
+                          spring: Motion.snappy,
+                          builder: (context, scale, child) => Transform.scale(scale: scale, child: child),
+                          child: AnimatedContainer(
+                            duration: Motion.base,
+                            curve: Motion.swift,
+                            padding: const EdgeInsets.all(3),
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              boxShadow: active
+                                  ? [BoxShadow(color: Palette.amber.withValues(alpha: 0.35), blurRadius: 14, spreadRadius: 1)]
+                                  : null,
+                            ),
+                            child: Icon(
+                              widget.icon,
+                              size: 19,
+                              color: active ? Palette.amber : (_hover ? Palette.textSecondary : Palette.textTertiary),
+                            ),
+                          ),
                         ),
                       ),
-                    ),
+                      Positioned(
+                        top: -4,
+                        right: -6,
+                        // A spring-scaled entrance for the badge itself: it
+                        // should feel like it pops into existence, not just
+                        // appear, since "your inbox now has an item" is a
+                        // state change worth a beat of its own rather than a
+                        // silent size-zero-to-full.
+                        child: Springable(
+                          value: widget.badgeCount > 0 ? 1.0 : 0.0,
+                          spring: Motion.snappy,
+                          builder: (context, scale, child) => Transform.scale(scale: scale, child: child),
+                          child: Container(
+                            constraints: const BoxConstraints(minWidth: 15),
+                            height: 15,
+                            padding: const EdgeInsets.symmetric(horizontal: 3),
+                            alignment: Alignment.center,
+                            decoration: BoxDecoration(
+                              color: Palette.amber,
+                              borderRadius: BorderRadius.circular(999),
+                              border: Border.all(color: Palette.chrome, width: 1.5),
+                            ),
+                            child: Text(
+                              widget.badgeCount > 9 ? '9+' : '${widget.badgeCount}',
+                              textAlign: TextAlign.center,
+                              style: TextStyle(
+                                fontFamily: 'Segoe UI',
+                                fontSize: 9,
+                                fontWeight: FontWeight.w700,
+                                height: 1,
+                                color: Palette.skin.isLight ? Colors.white : Palette.void_,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
                 ),
               ],

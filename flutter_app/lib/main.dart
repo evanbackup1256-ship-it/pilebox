@@ -3,6 +3,8 @@ import 'package:window_manager/window_manager.dart';
 
 import 'app_config.dart';
 import 'presentation/home_screen.dart';
+import 'presentation/splash_screen.dart';
+import 'services/appearance_service.dart';
 import 'services/update_service.dart';
 import 'services/vault_service.dart';
 import 'theme/app_theme.dart';
@@ -56,8 +58,18 @@ class _PileboxAppState extends State<PileboxApp> {
   final _vault = VaultService();
   final _updater = UpdateService();
 
+  bool _ready = false;
+  AppPreferences _preferences = const AppPreferences();
+
   Future<void> _quit() async {
     await windowManager.destroy();
+  }
+
+  void _onSplashReady(AppPreferences preferences) {
+    setState(() {
+      _preferences = preferences;
+      _ready = true;
+    });
   }
 
   @override
@@ -83,10 +95,35 @@ class _PileboxAppState extends State<PileboxApp> {
           title: AppConfig.displayName,
           debugShowCheckedModeBanner: false,
           theme: buildTheme(),
-          home: HomeScreen(
-            vault: _vault,
-            updater: _updater,
-            onQuit: _quit,
+          home: AnimatedSwitcher(
+            duration: Motion.slow,
+            switchInCurve: Motion.glide,
+            switchOutCurve: Motion.swift,
+            // The splash fades out while the home screen scales gently up
+            // from just-behind-full-size and fades in - reads as the app
+            // "arriving" rather than a plain crossfade, for the one
+            // transition every single launch actually shows the user.
+            transitionBuilder: (child, anim) => FadeTransition(
+              opacity: anim,
+              child: ScaleTransition(
+                scale: Tween(begin: 1.015, end: 1.0).animate(anim),
+                child: child,
+              ),
+            ),
+            child: _ready
+                ? HomeScreen(
+                    key: const ValueKey('home'),
+                    vault: _vault,
+                    updater: _updater,
+                    preferences: _preferences,
+                    onQuit: _quit,
+                  )
+                : SplashScreen(
+                    key: const ValueKey('splash'),
+                    vault: _vault,
+                    updater: _updater,
+                    onReady: _onSplashReady,
+                  ),
           ),
         );
       },

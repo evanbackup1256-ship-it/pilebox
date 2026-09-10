@@ -385,6 +385,135 @@ class _MiniChipState extends State<MiniChip> {
   }
 }
 
+/// A hoverable, pressable card shell with a real spring underneath instead
+/// of `AnimatedContainer`'s fixed-duration tween.
+///
+/// This replaces the hover-lift pattern that used to be hand-rolled in every
+/// card widget across the app (review cards, tag chips, note rows) with one
+/// implementation, so a fast in-and-out hover (flicking the mouse across a
+/// grid) continues from its actual in-flight position instead of restarting
+/// and visibly stuttering - the same reasoning as [Springable] itself, just
+/// packaged for the specific "card that lifts on hover, dips on press" shape
+/// used everywhere in this app.
+class HoverLift extends StatefulWidget {
+  const HoverLift({
+    super.key,
+    required this.builder,
+    this.onTap,
+    this.lift = 3.0,
+    this.pressScale = 0.98,
+    this.cursor = SystemMouseCursors.click,
+  });
+
+  /// Builds the card's visuals given the current hover/press state (0..1)
+  /// and how many pixels it should currently be lifted by.
+  final Widget Function(BuildContext context, double hoverT, double liftPx) builder;
+  final VoidCallback? onTap;
+  final double lift;
+  final double pressScale;
+  final MouseCursor cursor;
+
+  @override
+  State<HoverLift> createState() => _HoverLiftState();
+}
+
+class _HoverLiftState extends State<HoverLift> {
+  bool _hover = false;
+  bool _down = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final target = _down ? 0.0 : (_hover ? 1.0 : 0.0);
+
+    return MouseRegion(
+      cursor: widget.cursor,
+      onEnter: (_) => setState(() => _hover = true),
+      onExit: (_) => setState(() {
+        _hover = false;
+        _down = false;
+      }),
+      child: GestureDetector(
+        onTapDown: widget.onTap == null ? null : (_) => setState(() => _down = true),
+        onTapUp: widget.onTap == null ? null : (_) => setState(() => _down = false),
+        onTapCancel: widget.onTap == null ? null : () => setState(() => _down = false),
+        onTap: widget.onTap,
+        child: Springable(
+          value: _down ? widget.pressScale : 1.0,
+          spring: Motion.snappy,
+          builder: (context, scale, child) => Transform.scale(scale: scale, child: child),
+          child: Springable(
+            value: target,
+            spring: Motion.smooth,
+            builder: (context, t, child) => Transform.translate(
+              offset: Offset(0, -widget.lift * t),
+              child: widget.builder(context, t, widget.lift * t),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Fades and rises a child into place after [delay] - the building block for
+/// staggering a list or grid's entrance so items arrive one after another
+/// instead of all at once, which reads as far more deliberate for very
+/// little extra code. See [Staggered] to apply this across a whole list.
+class FadeInUp extends StatefulWidget {
+  const FadeInUp({super.key, required this.child, this.delay = Duration.zero});
+
+  final Widget child;
+  final Duration delay;
+
+  @override
+  State<FadeInUp> createState() => _FadeInUpState();
+}
+
+class _FadeInUpState extends State<FadeInUp> {
+  bool _in = false;
+
+  @override
+  void initState() {
+    super.initState();
+    if (!Motion.enabled) {
+      _in = true;
+    } else {
+      Future.delayed(widget.delay, () {
+        if (mounted) setState(() => _in = true);
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedOpacity(
+      duration: Motion.base,
+      curve: Motion.glide,
+      opacity: _in ? 1 : 0,
+      child: AnimatedSlide(
+        duration: Motion.base,
+        curve: Motion.glide,
+        offset: _in ? Offset.zero : const Offset(0, 0.08),
+        child: widget.child,
+      ),
+    );
+  }
+}
+
+/// Wraps each of [children] in a [FadeInUp] with an increasing delay, so a
+/// list or grid's items cascade in rather than popping into existence
+/// together. [step] is the delay between consecutive items, capped
+/// automatically so a very long list does not take forever to finish
+/// appearing. Returns a plain list, not a container - callers slot it into
+/// whatever layout (Wrap, Column, grid) the surrounding view already uses.
+List<Widget> staggered(List<Widget> children, {Duration step = const Duration(milliseconds: 28)}) {
+  final ms = step.inMilliseconds;
+  return [
+    for (var i = 0; i < children.length; i++)
+      FadeInUp(delay: Duration(milliseconds: (i * ms).clamp(0, 400)), child: children[i]),
+  ];
+}
+
 /// A labelled text field matching the app's input styling.
 class LabeledField extends StatelessWidget {
   const LabeledField({

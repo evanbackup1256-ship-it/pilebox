@@ -36,10 +36,10 @@ class TagsPanel extends StatelessWidget {
                 Wrap(
                   spacing: 10,
                   runSpacing: 10,
-                  children: [
+                  children: staggered([
                     for (final entry in counts)
                       _TagCard(tag: entry.key, count: entry.value, onTap: () => onSelectTag(entry.key)),
-                  ],
+                  ]),
                 ),
             ],
           ),
@@ -60,34 +60,31 @@ class _TagCard extends StatefulWidget {
 }
 
 class _TagCardState extends State<_TagCard> {
-  bool _hover = false;
-
   @override
   Widget build(BuildContext context) {
-    return MouseRegion(
-      cursor: SystemMouseCursors.click,
-      onEnter: (_) => setState(() => _hover = true),
-      onExit: (_) => setState(() => _hover = false),
-      child: GestureDetector(
-        onTap: widget.onTap,
-        child: AnimatedContainer(
-          duration: Motion.quick,
-          curve: Motion.swift,
-          transform: Matrix4.translationValues(0, _hover ? -2 : 0, 0),
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
-          decoration: BoxDecoration(
-            color: _hover ? Palette.amber.withValues(alpha: 0.08) : Palette.surface,
-            borderRadius: BorderRadius.circular(9),
-            border: Border.all(color: _hover ? Palette.amber.withValues(alpha: 0.4) : Palette.hairline),
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text('#${widget.tag}', style: AppType.body.copyWith(color: Palette.live, fontWeight: FontWeight.w600)),
-              const SizedBox(width: 8),
-              Text('${widget.count}', style: AppType.body.copyWith(color: Palette.textTertiary, fontSize: 11)),
-            ],
-          ),
+    return HoverLift(
+      onTap: widget.onTap,
+      builder: (context, t, liftPx) => Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
+        decoration: BoxDecoration(
+          color: Color.lerp(Palette.surface, Palette.amber.withValues(alpha: 0.08), t),
+          borderRadius: BorderRadius.circular(9),
+          border: Border.all(color: Color.lerp(Palette.hairline, Palette.amber.withValues(alpha: 0.4), t)!),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text('#${widget.tag}', style: AppType.body.copyWith(color: Palette.live, fontWeight: FontWeight.w600)),
+            const SizedBox(width: 8),
+            TweenAnimationBuilder<double>(
+              key: ValueKey(widget.count),
+              tween: Tween(begin: 0, end: 1),
+              duration: Motion.base,
+              curve: Motion.spring,
+              builder: (context, pop, child) => Transform.scale(scale: 0.7 + 0.3 * pop, child: child),
+              child: Text('${widget.count}', style: AppType.body.copyWith(color: Palette.textTertiary, fontSize: 11)),
+            ),
+          ],
         ),
       ),
     );

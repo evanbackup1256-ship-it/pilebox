@@ -149,13 +149,13 @@ class _NoteGrid extends StatelessWidget {
       child: Wrap(
         spacing: 10,
         runSpacing: 10,
-        children: [
+        children: staggered([
           for (final note in notes)
             SizedBox(
               width: 260,
               child: _ReviewCard(note: note, onTap: () => onOpen(note.id)),
             ),
-        ],
+        ]),
       ),
     );
   }
@@ -171,64 +171,61 @@ class _ReviewCard extends StatefulWidget {
 }
 
 class _ReviewCardState extends State<_ReviewCard> {
-  bool _hover = false;
-
   @override
   Widget build(BuildContext context) {
     final note = widget.note;
-    return MouseRegion(
-      cursor: SystemMouseCursors.click,
-      onEnter: (_) => setState(() => _hover = true),
-      onExit: (_) => setState(() => _hover = false),
-      child: GestureDetector(
-        onTap: widget.onTap,
-        child: AnimatedContainer(
-          duration: Motion.quick,
-          curve: Motion.swift,
-          transform: Matrix4.translationValues(0, _hover ? -2 : 0, 0),
-          padding: const EdgeInsets.all(13),
-          decoration: BoxDecoration(
-            color: _hover ? Palette.surfaceRaised : Palette.surface,
-            borderRadius: BorderRadius.circular(9),
-            border: Border.all(color: _hover ? Palette.amber.withValues(alpha: 0.4) : Palette.hairline),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  if (note.isPinned) ...[
-                    Icon(Icons.push_pin_rounded, size: 12, color: Palette.amber),
-                    const SizedBox(width: 6),
-                  ],
-                  Expanded(
-                    child: Text(
-                      note.title,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: AppType.body.copyWith(fontSize: 13, fontWeight: FontWeight.w600, color: Palette.textPrimary),
-                    ),
-                  ),
+    return HoverLift(
+      onTap: widget.onTap,
+      builder: (context, t, liftPx) => Container(
+        padding: const EdgeInsets.all(13),
+        decoration: BoxDecoration(
+          color: Color.lerp(Palette.surface, Palette.surfaceRaised, t),
+          borderRadius: BorderRadius.circular(9),
+          border: Border.all(color: Color.lerp(Palette.hairline, Palette.amber.withValues(alpha: 0.4), t)!),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.25 * t),
+              blurRadius: 16 * t,
+              offset: Offset(0, 6 * t),
+            ),
+          ],
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                if (note.isPinned) ...[
+                  Icon(Icons.push_pin_rounded, size: 12, color: Palette.amber),
+                  const SizedBox(width: 6),
                 ],
-              ),
-              if (note.excerpt.isNotEmpty) ...[
-                const SizedBox(height: 5),
-                Text(
-                  note.excerpt,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: AppType.body.copyWith(fontSize: 11.5, color: Palette.textTertiary, height: 1.4),
+                Expanded(
+                  child: Text(
+                    note.title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: AppType.body.copyWith(fontSize: 13, fontWeight: FontWeight.w600, color: Palette.textPrimary),
+                  ),
                 ),
               ],
+            ),
+            if (note.excerpt.isNotEmpty) ...[
+              const SizedBox(height: 5),
+              Text(
+                note.excerpt,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: AppType.body.copyWith(fontSize: 11.5, color: Palette.textTertiary, height: 1.4),
+              ),
             ],
-          ),
+          ],
         ),
       ),
     );
   }
 }
 
-class _RandomReview extends StatelessWidget {
+class _RandomReview extends StatefulWidget {
   const _RandomReview({required this.note, required this.onOpen, required this.onShuffle});
 
   final Note? note;
@@ -236,8 +233,20 @@ class _RandomReview extends StatelessWidget {
   final VoidCallback onShuffle;
 
   @override
+  State<_RandomReview> createState() => _RandomReviewState();
+}
+
+class _RandomReviewState extends State<_RandomReview> {
+  int _spins = 0;
+
+  void _shuffle() {
+    setState(() => _spins++);
+    widget.onShuffle();
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final note = this.note;
+    final note = widget.note;
     if (note == null) {
       return _EmptyState(
         icon: Icons.shuffle_rounded,
@@ -253,30 +262,47 @@ class _RandomReview extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Text('A NOTE TO REVISIT', style: AppType.label),
+            FadeInUp(child: Text('A NOTE TO REVISIT', style: AppType.label)),
             const SizedBox(height: 14),
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(20),
-              decoration: BoxDecoration(
-                color: Palette.surface,
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: Palette.hairline),
+            // Keyed on the note's own id, not just "a card" - swapping to a
+            // different random note replays the entrance, which is exactly
+            // what should draw the eye each time "Another one" is pressed.
+            AnimatedSwitcher(
+              duration: Motion.base,
+              switchInCurve: Motion.glide,
+              switchOutCurve: Motion.swift,
+              transitionBuilder: (child, anim) => FadeTransition(
+                opacity: anim,
+                child: SlideTransition(
+                  position: Tween(begin: const Offset(0, 0.06), end: Offset.zero).animate(anim),
+                  child: ScaleTransition(scale: Tween(begin: 0.97, end: 1.0).animate(anim), child: child),
+                ),
               ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(note.title, style: AppType.heading),
-                  if (note.excerpt.isNotEmpty) ...[
-                    const SizedBox(height: 8),
-                    Text(
-                      note.excerpt,
-                      style: AppType.body.copyWith(height: 1.6),
-                      maxLines: 5,
-                      overflow: TextOverflow.ellipsis,
-                    ),
+              child: Container(
+                key: ValueKey(note.id),
+                width: double.infinity,
+                padding: const EdgeInsets.all(20),
+                decoration: BoxDecoration(
+                  color: Palette.surface,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: Palette.hairline),
+                  boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.18), blurRadius: 24, offset: const Offset(0, 10))],
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(note.title, style: AppType.heading),
+                    if (note.excerpt.isNotEmpty) ...[
+                      const SizedBox(height: 8),
+                      Text(
+                        note.excerpt,
+                        style: AppType.body.copyWith(height: 1.6),
+                        maxLines: 5,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
                   ],
-                ],
+                ),
               ),
             ),
             const SizedBox(height: 16),
@@ -287,19 +313,41 @@ class _RandomReview extends StatelessWidget {
                   label: 'Open',
                   primary: true,
                   icon: Icons.open_in_new_rounded,
-                  onPressed: () => onOpen(note.id),
+                  onPressed: () => widget.onOpen(note.id),
                 ),
                 const SizedBox(width: 10),
-                ActionButton(
-                  label: 'Another one',
-                  icon: Icons.shuffle_rounded,
-                  onPressed: onShuffle,
-                ),
+                _SpinningShuffleButton(spins: _spins, onPressed: _shuffle),
               ],
             ),
           ],
         ),
       ),
+    );
+  }
+}
+
+/// The "Another one" button, whose icon does a full spin every time it's
+/// pressed - a small piece of feedback that the click was registered and a
+/// new note is on its way, timed to roughly match the card swap above it.
+class _SpinningShuffleButton extends StatefulWidget {
+  const _SpinningShuffleButton({required this.spins, required this.onPressed});
+  final int spins;
+  final VoidCallback onPressed;
+
+  @override
+  State<_SpinningShuffleButton> createState() => _SpinningShuffleButtonState();
+}
+
+class _SpinningShuffleButtonState extends State<_SpinningShuffleButton> {
+  @override
+  Widget build(BuildContext context) {
+    return TweenAnimationBuilder<double>(
+      key: ValueKey(widget.spins),
+      tween: Tween(begin: 0, end: 1),
+      duration: Motion.base,
+      curve: Motion.glide,
+      builder: (context, t, child) => Transform.rotate(angle: t * 6.28319, child: child),
+      child: ActionButton(label: 'Another one', icon: Icons.shuffle_rounded, onPressed: widget.onPressed),
     );
   }
 }

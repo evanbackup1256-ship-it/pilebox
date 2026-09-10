@@ -32,12 +32,14 @@ class CommandPalette extends StatefulWidget {
     required this.onOpenNote,
     required this.onNewNote,
     required this.onOpenView,
+    required this.onOpenDaily,
   });
 
   final VaultService vault;
   final ValueChanged<String> onOpenNote;
   final VoidCallback onNewNote;
   final ValueChanged<String> onOpenView;
+  final VoidCallback onOpenDaily;
 
   static Future<void> show(
     BuildContext context, {
@@ -45,6 +47,7 @@ class CommandPalette extends StatefulWidget {
     required ValueChanged<String> onOpenNote,
     required VoidCallback onNewNote,
     required ValueChanged<String> onOpenView,
+    required VoidCallback onOpenDaily,
   }) {
     return showGeneralDialog(
       context: context,
@@ -56,6 +59,7 @@ class CommandPalette extends StatefulWidget {
         onOpenNote: onOpenNote,
         onNewNote: onNewNote,
         onOpenView: onOpenView,
+        onOpenDaily: onOpenDaily,
       ),
       transitionBuilder: (context, animation, _, child) {
         final curved = CurvedAnimation(parent: animation, curve: Motion.swift);
@@ -117,6 +121,12 @@ class _CommandPaletteState extends State<CommandPalette> {
         onSelect: widget.onNewNote,
       ),
       PaletteAction(
+        icon: Icons.today_outlined,
+        title: "Open today's daily note",
+        subtitle: 'Creates it on first use, reopens it after that',
+        onSelect: widget.onOpenDaily,
+      ),
+      PaletteAction(
         icon: Icons.hub_outlined,
         title: 'Open Graph',
         onSelect: () => widget.onOpenView('graph'),
@@ -141,6 +151,24 @@ class _CommandPaletteState extends State<CommandPalette> {
         icon: Icons.tune_rounded,
         title: 'Open Settings',
         onSelect: () => widget.onOpenView('settings'),
+      ),
+      PaletteAction(
+        icon: Icons.menu_book_outlined,
+        title: 'Open Help',
+        subtitle: 'Guide, shortcuts, and how your data is stored',
+        onSelect: () => widget.onOpenView('help'),
+      ),
+      PaletteAction(
+        icon: Icons.find_replace_rounded,
+        title: 'Find & replace across vault',
+        subtitle: 'Search and replace text in every note at once',
+        onSelect: () => widget.onOpenView('find-replace'),
+      ),
+      PaletteAction(
+        icon: Icons.dashboard_customize_outlined,
+        title: 'New from template',
+        subtitle: 'Start a note from a saved template',
+        onSelect: () => widget.onOpenView('template'),
       ),
     ];
 
@@ -317,19 +345,28 @@ class _PaletteRow extends StatelessWidget {
       child: GestureDetector(
         onTap: onTap,
         behavior: HitTestBehavior.opaque,
-        child: Container(
+        child: AnimatedContainer(
+          duration: Motion.quick,
+          curve: Motion.swift,
           margin: const EdgeInsets.symmetric(vertical: 2),
           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
+          transform: Matrix4.translationValues(selected ? 2 : 0, 0, 0),
           decoration: BoxDecoration(
             color: selected ? Palette.amber.withValues(alpha: 0.12) : Colors.transparent,
             borderRadius: BorderRadius.circular(7),
+            border: Border.all(color: selected ? Palette.amber.withValues(alpha: 0.25) : Colors.transparent),
           ),
           child: Row(
             children: [
-              Icon(
-                action.icon,
-                size: 16,
-                color: selected ? Palette.amber : Palette.textTertiary,
+              AnimatedScale(
+                duration: Motion.quick,
+                curve: Motion.spring,
+                scale: selected ? 1.12 : 1.0,
+                child: Icon(
+                  action.icon,
+                  size: 16,
+                  color: selected ? Palette.amber : Palette.textTertiary,
+                ),
               ),
               const SizedBox(width: 12),
               Expanded(
@@ -356,6 +393,12 @@ class _PaletteRow extends StatelessWidget {
                       ),
                   ],
                 ),
+              ),
+              const SizedBox(width: 10),
+              AnimatedOpacity(
+                duration: Motion.quick,
+                opacity: selected ? 1.0 : 0.0,
+                child: _KeyHint(label: 'Enter'),
               ),
             ],
           ),
