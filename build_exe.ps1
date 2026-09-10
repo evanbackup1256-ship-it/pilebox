@@ -88,6 +88,23 @@ if ($problems.Count -gt 0) {
 
 Push-Location $AppDir
 try {
+    # --- 0. Close a running instance first ----------------------------------
+    # A previous build's exe left running locks its own DLLs and, on Windows,
+    # its own file - `flutter build` then fails deep inside CMake with a
+    # confusing "No target" error that has nothing obviously to do with a
+    # running process. Closing it first turns a manual recovery step into
+    # something this script just handles.
+    $BinaryName = (Select-String -Path (Join-Path $AppDir 'windows\CMakeLists.txt') `
+        -Pattern 'set\(BINARY_NAME "([^"]+)"\)').Matches.Groups[1].Value
+    if ($BinaryName) {
+        $running = Get-Process -Name $BinaryName -ErrorAction SilentlyContinue
+        if ($running) {
+            Write-Host "Closing a running $BinaryName instance before building..." -ForegroundColor Yellow
+            $running | Stop-Process -Force -ErrorAction SilentlyContinue
+            Start-Sleep -Seconds 1
+        }
+    }
+
     # --- 1. Generate the windows/ runner if it does not exist yet ----------
     # `flutter create` on an existing directory adds the missing platform
     # scaffolding without touching lib/ or pubspec.yaml.

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../theme/app_theme.dart';
+import 'springable.dart';
 
 /// A button that lifts and brightens on hover, and dips on press.
 ///
@@ -50,6 +51,13 @@ class _ActionButtonState extends State<ActionButton> {
             ? Palette.void_
             : (_hover ? Palette.textPrimary : Palette.textSecondary);
 
+    // A real spring here (vs. the AnimatedScale it replaces) means a fast
+    // double-click - press, release, press again before the first release's
+    // animation settles - continues from the actual in-flight scale and
+    // velocity instead of snapping back to 1.0 and re-easing, which is
+    // exactly the kind of rapid repeated interaction a button gets.
+    final targetScale = _down ? 0.965 : (_hover ? 1.02 : 1.0);
+
     return MouseRegion(
       cursor: enabled ? SystemMouseCursors.click : SystemMouseCursors.basic,
       onEnter: (_) => setState(() => _hover = true),
@@ -62,10 +70,10 @@ class _ActionButtonState extends State<ActionButton> {
         onTapUp: enabled ? (_) => setState(() => _down = false) : null,
         onTapCancel: enabled ? () => setState(() => _down = false) : null,
         onTap: enabled ? widget.onPressed : null,
-        child: AnimatedScale(
-          duration: Motion.quick,
-          curve: Motion.swift,
-          scale: _down ? 0.97 : (_hover ? 1.015 : 1),
+        child: Springable(
+          value: targetScale,
+          spring: Motion.snappy,
+          builder: (context, scale, child) => Transform.scale(scale: scale, child: child),
           child: AnimatedContainer(
             duration: Motion.quick,
             curve: Motion.swift,
@@ -309,6 +317,7 @@ class MiniChip extends StatefulWidget {
 
 class _MiniChipState extends State<MiniChip> {
   bool _hover = false;
+  bool _down = false;
 
   @override
   Widget build(BuildContext context) {
@@ -317,47 +326,58 @@ class _MiniChipState extends State<MiniChip> {
     return MouseRegion(
       cursor: SystemMouseCursors.click,
       onEnter: (_) => setState(() => _hover = true),
-      onExit: (_) => setState(() => _hover = false),
+      onExit: (_) => setState(() {
+        _hover = false;
+        _down = false;
+      }),
       child: GestureDetector(
+        onTapDown: (_) => setState(() => _down = true),
+        onTapUp: (_) => setState(() => _down = false),
+        onTapCancel: () => setState(() => _down = false),
         onTap: widget.onTap,
-        child: AnimatedContainer(
-          duration: Motion.quick,
-          curve: Motion.swift,
-          padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 7),
-          decoration: BoxDecoration(
-            color: selected
-                ? Palette.amber.withValues(alpha: 0.13)
-                : (_hover ? Palette.surfaceRaised : Palette.surface),
-            borderRadius: BorderRadius.circular(999),
-            border: Border.all(
+        child: Springable(
+          value: _down ? 0.93 : 1.0,
+          spring: Motion.snappy,
+          builder: (context, scale, child) => Transform.scale(scale: scale, child: child),
+          child: AnimatedContainer(
+            duration: Motion.quick,
+            curve: Motion.swift,
+            padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 7),
+            decoration: BoxDecoration(
               color: selected
-                  ? Palette.amber.withValues(alpha: 0.55)
-                  : Palette.hairline,
+                  ? Palette.amber.withValues(alpha: 0.13)
+                  : (_hover ? Palette.surfaceRaised : Palette.surface),
+              borderRadius: BorderRadius.circular(999),
+              border: Border.all(
+                color: selected
+                    ? Palette.amber.withValues(alpha: 0.55)
+                    : Palette.hairline,
+              ),
             ),
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              if (widget.dot) ...[
-                Container(
-                  width: 5,
-                  height: 5,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: Palette.live,
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (widget.dot) ...[
+                  Container(
+                    width: 5,
+                    height: 5,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: Palette.live,
+                    ),
+                  ),
+                  const SizedBox(width: 7),
+                ],
+                Text(
+                  widget.label,
+                  style: AppType.body.copyWith(
+                    fontSize: 11.5,
+                    color: selected ? Palette.amber : Palette.textSecondary,
+                    fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
                   ),
                 ),
-                const SizedBox(width: 7),
               ],
-              Text(
-                widget.label,
-                style: AppType.body.copyWith(
-                  fontSize: 11.5,
-                  color: selected ? Palette.amber : Palette.textSecondary,
-                  fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
-                ),
-              ),
-            ],
+            ),
           ),
         ),
       ),

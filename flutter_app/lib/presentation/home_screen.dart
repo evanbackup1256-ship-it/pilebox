@@ -15,6 +15,7 @@ import 'review_panel.dart';
 import 'settings_panel.dart';
 import 'tags_panel.dart';
 import 'widgets/command_palette.dart';
+import 'widgets/springable.dart';
 import 'widgets/window_chrome.dart';
 
 enum _View { notes, graph, tags, review, settings, about }
@@ -388,19 +389,27 @@ class _RailButtonState extends State<_RailButton> {
                     ),
                   ),
                 ),
-                AnimatedScale(
-                  duration: Motion.quick,
-                  scale: _hover ? 1.09 : 1,
+                Springable(
+                  value: _hover ? 1.12 : 1.0,
+                  spring: Motion.snappy,
+                  builder: (context, scale, child) => Transform.scale(scale: scale, child: child),
                   child: Icon(
                     widget.icon,
                     size: 19,
                     color: active ? Palette.amber : (_hover ? Palette.textSecondary : Palette.textTertiary),
                   ),
                 ),
-                if (widget.badgeCount > 0)
-                  Positioned(
-                    top: 8,
-                    right: 11,
+                Positioned(
+                  top: 8,
+                  right: 11,
+                  // A spring-scaled entrance for the badge itself: it should
+                  // feel like it pops into existence, not just appear, since
+                  // "your inbox now has an item" is a state change worth a
+                  // beat of its own rather than a silent size-zero-to-full.
+                  child: Springable(
+                    value: widget.badgeCount > 0 ? 1.0 : 0.0,
+                    spring: Motion.snappy,
+                    builder: (context, scale, child) => Transform.scale(scale: scale, child: child),
                     child: Container(
                       constraints: const BoxConstraints(minWidth: 15),
                       height: 15,
@@ -424,6 +433,7 @@ class _RailButtonState extends State<_RailButton> {
                       ),
                     ),
                   ),
+                ),
               ],
             ),
           ),

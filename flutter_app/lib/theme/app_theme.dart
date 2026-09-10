@@ -474,8 +474,12 @@ class AppType {
       );
 }
 
-/// Motion tokens. Springs, not linear curves - every transition here is
-/// interruptible and settles rather than stopping dead.
+/// Motion tokens. Real spring simulations, not eased durations - a spring
+/// responds to its current velocity, so interrupting one mid-flight (moving
+/// the mouse again before a hover settles, opening a second note before the
+/// first transition finishes) continues smoothly from wherever it actually
+/// is instead of snapping back to a start value and re-easing. That
+/// difference is most of what separates "animated" from "feels physical".
 class Motion {
   const Motion._();
 
@@ -505,6 +509,34 @@ class Motion {
       level == 0 ? Curves.linear : const Cubic(0.16, 1, 0.3, 1);
 
   static bool get enabled => level > 0;
+
+  // --- Physical spring descriptions -------------------------------------
+  //
+  // Used with SpringSimulation-backed widgets (see widgets/springable.dart)
+  // rather than fixed-duration Tweens, for anything that can plausibly be
+  // interrupted mid-animation: hover states, press feedback, drag-to-reveal,
+  // the note-open transition. A SpringDescription is mass/stiffness/damping,
+  // not a duration - "how long it takes" falls out of the physics instead of
+  // being declared up front, which is exactly why restarting one from a live
+  // velocity does not glitch.
+
+  /// Snappy and slightly bouncy. Buttons, chips, toggle switches.
+  static const springSnappy = SpringDescription(mass: 1, stiffness: 420, damping: 26);
+
+  /// Softer, more travel. Panel/note transitions, modal entrances.
+  static const springSmooth = SpringDescription(mass: 1, stiffness: 210, damping: 24);
+
+  /// Very little overshoot. Drag-follow, anything tracking a pointer.
+  static const springTight = SpringDescription(mass: 1, stiffness: 500, damping: 40);
+
+  /// A critically-damped instant snap, used when [level] is 0 (reduced
+  /// motion) so a spring-driven widget still moves, just without any bounce
+  /// or perceptible duration.
+  static const springReduced = SpringDescription(mass: 1, stiffness: 1000, damping: 200);
+
+  static SpringDescription get snappy => level == 0 ? springReduced : springSnappy;
+  static SpringDescription get smooth => level == 0 ? springReduced : springSmooth;
+  static SpringDescription get tight => level == 0 ? springReduced : springTight;
 }
 
 /// Reads the saved appearance settings before the app builds, so the first
