@@ -7,7 +7,7 @@ class AppConfig {
 
   static const appName = 'Pilebox';
   static const displayName = 'Pilebox';
-  static const version = '3.2.0';
+  static const version = '3.2.2';
 
   static const tagline = 'A local, Zettelkasten-style knowledge base';
 

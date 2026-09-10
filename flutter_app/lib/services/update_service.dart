@@ -413,9 +413,16 @@ del "%~f0"
 exit /b 1
 ''');
 
+      // `start ""` hands the child off to the shell's own process launcher
+      // instead of leaving it parented directly to this process. Plain
+      // ProcessStartMode.detached was observed to sometimes not survive this
+      // app's own exit moments later - the child never got the chance to run
+      // its waitloop, so the swap silently never happened and the app never
+      // relaunched. Routing through `start` is the same trick Explorer and
+      // installers use to launch something that must outlive the caller.
       await Process.start(
         'cmd.exe',
-        ['/c', script.path],
+        ['/c', 'start', '""', '/min', script.path],
         mode: ProcessStartMode.detached,
         runInShell: false,
       );
